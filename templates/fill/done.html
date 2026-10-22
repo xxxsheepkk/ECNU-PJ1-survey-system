@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}提交成功 · {{ survey.title }}{% endblock %}
+{% block content %}
+<section class="card narrow center">
+  <h1>提交成功</h1>
+  <p>感谢你填写「{{ survey.title }}」。</p>
+  <a class="btn primary" href="{{ url_for('surveys.dashboard') }}">返回我的问卷</a>
+</section>
+{% endblock %}

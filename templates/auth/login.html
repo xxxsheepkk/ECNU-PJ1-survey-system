@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}登录 · 在线问卷系统{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>登录</h1>
+  <form method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <label>用户名
+      <input name="username" value="{{ form.username }}" required>
+    </label>
+    <label>密码
+      <input type="password" name="password" required>
+    </label>
+    <button type="submit" class="btn primary">登录</button>
+  </form>
+  <p class="muted">还没有账号？<a href="{{ url_for('auth.register') }}">去注册</a></p>
+</section>
+{% endblock %}

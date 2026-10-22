@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}注册 · 在线问卷系统{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>注册</h1>
+  <p class="muted">用户名 3~30 个字符，密码至少 6 位。</p>
+  <form method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <label>用户名
+      <input name="username" value="{{ form.username }}" required minlength="3" maxlength="30">
+    </label>
+    <label>密码
+      <input type="password" name="password" required minlength="6">
+    </label>
+    <label>确认密码
+      <input type="password" name="confirm_password" required minlength="6">
+    </label>
+    <button type="submit" class="btn primary">注册</button>
+  </form>
+  <p class="muted">已有账号？<a href="{{ url_for('auth.login') }}">去登录</a></p>
+</section>
+{% endblock %}

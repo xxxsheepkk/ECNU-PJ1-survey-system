@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}{{ survey.title }} · 管理{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ survey.title }}</h1>
+    <p class="muted">{{ survey.description or "暂无说明" }}</p>
+    <p>
+      <span class="badge {{ survey.status }}">{{ display_status }}</span>
+      <span class="muted">已提交 {{ submission_count }} 份</span>
+      {% if survey.deadline %}<span class="muted">截止：{{ survey.deadline|dt }}</span>{% endif %}
+    </p>
+  </div>
+  <div class="row">
+    <a class="btn" href="{{ url_for('stats.overview', survey_id=survey._id) }}">查看统计</a>
+    {% if can_edit %}
+      <a class="btn" href="{{ url_for('surveys.edit', survey_id=survey._id) }}">编辑信息</a>
+      <form method="post" action="{{ url_for('surveys.publish', survey_id=survey._id) }}" class="inline">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button type="submit" class="btn primary">发布问卷</button>
+      </form>
+    {% elif survey.status == "published" %}
+      <form method="post" action="{{ url_for('surveys.close', survey_id=survey._id) }}" class="inline" onsubmit="return confirm('关闭后填写链接将不可用，确定吗？');">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button type="submit" class="btn danger">关闭问卷</button>
+      </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if survey.status != "draft" %}
+<section class="card">
+  <h2>分享链接</h2>
+  <p><a href="{{ public_url }}" target="_blank">{{ public_url }}</a></p>
+  <p class="muted small">填写者需要先登录；匿名选项在问卷允许时才会出现。</p>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>截止时间</h2>
+  <form method="post" action="{{ url_for('surveys.update_deadline', survey_id=survey._id) }}" class="row">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <input type="datetime-local" name="deadline" value="{{ survey.deadline|dt_input }}">
+    <button type="submit" class="btn">更新截止时间</button>
+  </form>
+</section>
+
+<div class="page-head">
+  <h2>题目（{{ questions|length }}）</h2>
+  {% if can_edit %}
+    <a class="btn primary" href="{{ url_for('surveys.question_new', survey_id=survey._id) }}">添加题目</a>
+  {% endif %}
+</div>
+
+{% if not questions %}
+  <section class="card empty"><p>还没有题目。发布前至少需要一道题。</p></section>
+{% endif %}
+
+{% for question in questions %}
+<article class="card question-card" id="q-{{ question._id }}">
+  <div class="page-head">
+    <h3>第 {{ question.order }} 题 · {{ question.type|type_label }} {% if question.required %}<span class="badge required">必答</span>{% endif %}</h3>
+    {% if can_edit %}
+      <div class="row">
+        <a class="btn small" href="{{ url_for('surveys.question_edit', survey_id=survey._id, question_id=question._id) }}">编辑</a>
+        <form method="post" action="{{ url_for('surveys.question_delete', survey_id=survey._id, question_id=question._id) }}" class="inline" onsubmit="return confirm('删除这道题？相关跳转规则会一并清理。');">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button type="submit" class="btn small danger">删除</button>
+        </form>
+      </div>
+    {% endif %}
+  </div>
+  <p class="question-title">{{ question.title }}</p>
+  {% if question.options %}
+    <ul class="options">
+      {% for opt in question.options %}
+        <li><span class="key">{{ opt.key }}</span> {{ opt.text }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  {% if question.settings_summary %}
+    <p class="muted small">限制：{{ question.settings_summary }}</p>
+  {% endif %}
+
+  {% if question.rules_view %}
+    <div class="rules">
+      <h4>跳转规则</h4>
+      {% for rule in question.rules_view %}
+        <div class="rule-row">
+          <span>如果 {{ rule.operator_label }} {{ rule.value_label }} → {{ rule.target_label }}</span>
+          {% if can_edit %}
+            <form method="post" action="{{ url_for('surveys.rule_delete', survey_id=survey._id, question_id=question._id, rule_index=loop.index0) }}" class="inline">
+              <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+              <button type="submit" class="btn small danger">删除规则</button>
+            </form>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if can_edit and question.type != "text" and question.target_options %}
+    <details class="rule-form">
+      <summary>添加跳转规则</summary>
+      <form method="post" action="{{ url_for('surveys.rule_add', survey_id=survey._id, question_id=question._id) }}">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <div class="row">
+          <label>条件
+            <select name="operator" class="rule-operator">
+              {% for op in question.jump_operator_options %}
+                <option value="{{ op.value }}" data-kind="{{ op.kind }}">{{ op.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>条件值
+            {% if question.type in ("single", "multiple") %}
+              <select name="value" class="rule-value option-value">
+                {% for opt in question.options %}
+                  <option value="{{ opt.key }}">{{ opt.key }} - {{ opt.text }}</option>
+                {% endfor %}
+              </select>
+              <input type="text" class="rule-value other-value" data-name="value" placeholder="数量或数值" disabled>
+            {% else %}
+              <input type="text" name="value" class="rule-value other-value" data-name="value" placeholder="数值">
+              <select class="rule-value option-value" data-name="value" disabled></select>
+            {% endif %}
+          </label>
+          <label>跳转到
+            <select name="target">
+              {% for target in question.target_options %}
+                <option value="{{ target._id }}">第 {{ target.order }} 题</option>
+              {% endfor %}
+              <option value="end">结束问卷</option>
+            </select>
+          </label>
+          <button type="submit" class="btn primary">添加规则</button>
+        </div>
+      </form>
+    </details>
+  {% endif %}
+</article>
+{% endfor %}
+
+<script>
+  document.querySelectorAll('.rule-form').forEach(function (form) {
+    var operator = form.querySelector('.rule-operator');
+    var optionSelect = form.querySelector('.option-value');
+    var otherInput = form.querySelector('.other-value');
+    function refresh() {
+      var kind = operator.options[operator.selectedIndex].getAttribute('data-kind');
+      if (kind === 'option' && optionSelect) {
+        optionSelect.disabled = false;
+        optionSelect.setAttribute('name', 'value');
+        if (otherInput) { otherInput.disabled = true; otherInput.removeAttribute('name'); }
+      } else {
+        if (optionSelect) { optionSelect.disabled = true; optionSelect.removeAttribute('name'); }
+        if (otherInput) { otherInput.disabled = false; otherInput.setAttribute('name', 'value'); }
+      }
+    }
+    if (operator) { operator.addEventListener('change', refresh); refresh(); }
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}第 {{ question.order }} 题统计 · {{ survey.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>第 {{ question.order }} 题统计</h1>
+    <p class="muted">{{ survey.title }} · {{ question.type|type_label }}</p>
+  </div>
+  <a class="btn" href="{{ url_for('stats.overview', survey_id=survey._id) }}">返回总览</a>
+</div>
+
+<section class="card">
+  <p class="question-title">{{ question.title }}</p>
+  <p class="muted">已提交 {{ stats.total_submissions }} 份；回答 {{ stats.answered_count }} 份，未回答 {{ stats.unanswered_count }} 份。</p>
+
+  {% if question.type in ("single", "multiple") %}
+    <div class="stats-bars">
+      {% for opt in stats.options %}
+        <div class="bar-row">
+          <span class="bar-label">{{ opt.label }}</span>
+          <div class="bar-track"><div class="bar-fill" style="width: {{ opt.percent }}%"></div></div>
+          <span class="bar-value">{{ opt.count }}（{{ opt.percent }}%）</span>
+        </div>
+      {% endfor %}
+    </div>
+    <p class="muted small">占比分母为实际回答该题的人数。</p>
+
+  {% elif question.type == "number" %}
+    {% if stats.number %}
+      <p>回答数 {{ stats.number.count }}，平均 {{ stats.number.avg if stats.number.avg is not none else "—" }}，最小 {{ stats.number.min if stats.number.min is not none else "—" }}，最大 {{ stats.number.max if stats.number.max is not none else "—" }}。</p>
+    {% endif %}
+    <h3>回答明细</h3>
+    {% if stats.answer_rows %}
+      <p class="muted small">第 {{ stats.range_start }}–{{ stats.range_end }} 条，共 {{ stats.answered_count }} 条。</p>
+      <ul class="answer-list">
+        {% for item in stats.answer_rows %}
+          <li>{{ item.value }} <span class="muted small">{{ item.at|dt }}</span></li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">暂无数字回答。</p>
+    {% endif %}
+
+  {% elif question.type == "text" %}
+    <h3>文本回答</h3>
+    {% if stats.answer_rows %}
+      <p class="muted small">第 {{ stats.range_start }}–{{ stats.range_end }} 条，共 {{ stats.answered_count }} 条。</p>
+      <ul class="answer-list">
+        {% for item in stats.answer_rows %}
+          <li>{{ item.value }} <span class="muted small">{{ item.at|dt }}</span></li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">暂无文本回答。</p>
+    {% endif %}
+  {% endif %}
+
+  {% if stats.total_pages > 1 %}
+    <nav class="pagination" aria-label="回答分页">
+      {% if stats.has_prev %}
+        <a class="btn small" href="{{ url_for('stats.question_detail', survey_id=survey._id, question_id=question._id, page=stats.page-1) }}">上一页</a>
+      {% else %}
+        <span class="btn small disabled">上一页</span>
+      {% endif %}
+      <span>第 {{ stats.page }} / {{ stats.total_pages }} 页</span>
+      {% if stats.has_next %}
+        <a class="btn small" href="{{ url_for('stats.question_detail', survey_id=survey._id, question_id=question._id, page=stats.page+1) }}">下一页</a>
+      {% else %}
+        <span class="btn small disabled">下一页</span>
+      {% endif %}
+    </nav>
+  {% endif %}
+</section>
+{% endblock %}

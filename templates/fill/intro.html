@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ survey.title }} · 填写问卷{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ survey.title }}</h1>
+  <p class="muted">{{ survey.description or "暂无说明" }}</p>
+  <p class="muted">共 {{ question_count }} 道题。填写过程中会逐题保存，可随时继续。</p>
+
+  {% if not available %}
+    <div class="flash error">{{ unavailable_reason }}</div>
+  {% elif blocked %}
+    <div class="flash error">该问卷不允许重复提交，你已经提交过了。</div>
+  {% else %}
+    {% if draft %}
+      <div class="flash success">你有一份未完成的填写，可以继续。</div>
+      <div class="row">
+        <a class="btn primary" href="{{ url_for('fill.fill', public_id=survey.public_id) }}">继续填写</a>
+        <form method="post" action="{{ url_for('fill.abandon', public_id=survey.public_id) }}" class="inline" onsubmit="return confirm('放弃后本次已填内容会被删除，确定吗？');">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button type="submit" class="btn danger">放弃本次填写</button>
+        </form>
+      </div>
+    {% else %}
+      <form method="post" action="{{ url_for('fill.start', public_id=survey.public_id) }}">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        {% if survey.allow_anonymous %}
+          <label class="check">
+            <input type="checkbox" name="anonymous" value="1">
+            匿名提交（不保存账号关联）
+          </label>
+        {% endif %}
+        <button type="submit" class="btn primary">开始填写</button>
+      </form>
+      {% if completed_count %}
+        <p class="muted small">你已提交 {{ completed_count }} 份；该问卷允许重复提交。</p>
+      {% endif %}
+    {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}统计 · {{ survey.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>统计结果</h1>
+    <p class="muted">{{ survey.title }} · 已提交 <strong>{{ total }}</strong> 份答卷</p>
+  </div>
+  <a class="btn" href="{{ url_for('surveys.detail', survey_id=survey._id) }}">返回问卷</a>
+</div>
+
+{% if total == 0 %}
+  <section class="card empty"><p>还没有答卷。分享链接并等待填写后再来看。</p></section>
+{% endif %}
+
+{% for row in stats_rows %}
+  {% set question = row.question %}
+  <article class="card">
+    <div class="page-head">
+      <h3>第 {{ question.order }} 题 · {{ question.type|type_label }}</h3>
+      <a class="btn small" href="{{ url_for('stats.question_detail', survey_id=survey._id, question_id=question._id) }}">查看详情</a>
+    </div>
+    <p class="question-title">{{ question.title }}</p>
+    <p class="muted small">回答 {{ row.answered_count }} 份，未回答 {{ row.unanswered_count }} 份。</p>
+
+    {% if question.type in ("single", "multiple") %}
+      <div class="stats-bars">
+        {% for opt in row.options %}
+          <div class="bar-row">
+            <span class="bar-label">{{ opt.label }}</span>
+            <div class="bar-track"><div class="bar-fill" style="width: {{ opt.percent }}%"></div></div>
+            <span class="bar-value">{{ opt.count }}（{{ opt.percent }}%）</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% elif question.type == "number" and row.number %}
+      <p>平均 {{ row.number.avg if row.number.avg is not none else "—" }}，最小 {{ row.number.min if row.number.min is not none else "—" }}，最大 {{ row.number.max if row.number.max is not none else "—" }}。</p>
+    {% elif question.type == "text" %}
+      {% if row.answer_rows %}
+        <ul class="answer-list">
+          {% for item in row.answer_rows %}
+            <li>{{ item.value }} <span class="muted small">{{ item.at|dt }}</span></li>
+          {% endfor %}
+        </ul>
+        <p class="muted small">这里展示最近 {{ row.answer_rows|length }} 条，完整回答请查看详情。</p>
+      {% else %}
+        <p class="muted">暂无文本回答。</p>
+      {% endif %}
+    {% endif %}
+  </article>
+{% endfor %}
+{% endblock %}

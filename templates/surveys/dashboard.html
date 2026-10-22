@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}我的问卷 · 在线问卷系统{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>我的问卷</h1>
+    <p class="muted">这里只显示你创建的问卷。</p>
+  </div>
+  <a class="btn primary" href="{{ url_for('surveys.create') }}">新建问卷</a>
+</div>
+
+{% if surveys %}
+  <div class="grid">
+    {% for survey in surveys %}
+      <article class="card survey-card">
+        <h2><a href="{{ url_for('surveys.detail', survey_id=survey._id) }}">{{ survey.title }}</a></h2>
+        <p class="muted">{{ survey.description or "暂无说明" }}</p>
+        <div class="row">
+          <span class="badge {{ survey.status }}">{{ survey.display_status }}</span>
+          <span class="muted">已提交 {{ survey.submission_count }} 份</span>
+        </div>
+        <p class="muted small">创建于 {{ survey.created_at|dt }}</p>
+        <div class="row">
+          <a class="btn small" href="{{ url_for('surveys.detail', survey_id=survey._id) }}">管理</a>
+          <a class="btn small" href="{{ url_for('stats.overview', survey_id=survey._id) }}">统计</a>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+{% else %}
+  <section class="card empty">
+    <p>还没有问卷。</p>
+    <a class="btn primary" href="{{ url_for('surveys.create') }}">创建第一份问卷</a>
+  </section>
+{% endif %}
+{% endblock %}

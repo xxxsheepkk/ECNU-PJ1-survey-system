@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}第 {{ question.order }} 题 · {{ survey.title }}{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <div class="progress">
+    <span>第 {{ question.order }} 题</span>
+    <span class="muted">已答 {{ answered_count }} / {{ total_questions }}</span>
+  </div>
+  <h1 class="question-title">{{ question.title }}{% if question.required %}<span class="badge required">必答</span>{% endif %}</h1>
+
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ url_for('fill.answer', public_id=survey.public_id) }}">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="question_id" value="{{ question._id }}">
+
+    {% if question.type == "single" %}
+      <div class="choice-list">
+        {% for opt in question.options %}
+          <label class="choice">
+            <input type="radio" name="value" value="{{ opt.key }}" {% if selected == opt.key %}checked{% endif %} required>
+            {{ opt.text }}
+          </label>
+        {% endfor %}
+      </div>
+    {% elif question.type == "multiple" %}
+      <div class="choice-list">
+        {% for opt in question.options %}
+          <label class="choice">
+            <input type="checkbox" name="value" value="{{ opt.key }}" {% if opt.key in selected %}checked{% endif %}>
+            {{ opt.text }}
+          </label>
+        {% endfor %}
+      </div>
+      <p class="muted small">{{ question|settings_summary }}</p>
+    {% elif question.type == "text" %}
+      <textarea name="value" rows="5" {% if question.required %}required{% endif %}>{{ selected }}</textarea>
+      <p class="muted small">{{ question|settings_summary }}</p>
+    {% elif question.type == "number" %}
+      <input type="text" inputmode="decimal" name="value" value="{{ selected }}" {% if question.required %}required{% endif %}>
+      <p class="muted small">{{ question|settings_summary }}</p>
+    {% endif %}
+
+    <div class="row">
+      <button type="submit" class="btn primary">保存并继续</button>
+      <a class="btn" href="{{ url_for('fill.intro', public_id=survey.public_id) }}">返回说明</a>
+    </div>
+  </form>
+
+  <form method="post" action="{{ url_for('fill.abandon', public_id=survey.public_id) }}" class="inline" onsubmit="return confirm('放弃后本次已填内容会被删除，确定吗？');">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <button type="submit" class="btn link-button danger">放弃本次填写</button>
+  </form>
+</section>
+{% endblock %}

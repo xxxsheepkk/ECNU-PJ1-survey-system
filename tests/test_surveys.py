@@ -1,4 +1,4 @@
-from db import QUESTIONS
+from db import SURVEY_QUESTIONS
 from tests.helpers import (
     add_question,
     create_survey,
@@ -60,7 +60,7 @@ def test_create_four_question_types_and_publish(client, db):
         follow_redirects=True,
     )
     assert "发布后不能增加题目" in response.get_data(as_text=True)
-    count = db[QUESTIONS].count_documents({"survey_id": survey["_id"]})
+    count = db[SURVEY_QUESTIONS].count_documents({"survey_id": survey["_id"]})
     assert count == 4
 
 

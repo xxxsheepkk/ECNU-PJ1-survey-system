@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}从题库选择 · {{ survey.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>从题库选择题目</h1>
+  <a class="btn" href="{{ url_for('surveys.detail', survey_id=survey._id) }}">返回问卷</a>
+</div>
+
+{% if not entries %}
+  <section class="card empty">
+    <p>没有可选的题目。你可以在<a href="{{ url_for('library.index') }}">题目库</a>新建题目，或等待他人共享题目给你。</p>
+  </section>
+{% endif %}
+
+{% for entry in entries %}
+<article class="card">
+  <div class="page-head">
+    <h3>{{ entry.question.title }} <span class="muted small">{{ entry.question.type|type_label }} · {{ entry.source }}</span></h3>
+    {% if entry.already_added %}
+      <span class="badge muted">已在问卷中</span>
+    {% else %}
+      <form method="post" action="{{ url_for('surveys.question_add', survey_id=survey._id) }}">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <input type="hidden" name="question_id" value="{{ entry.question._id }}">
+        <select name="version_id">
+          {% for version in entry.versions %}
+            <option value="{{ version._id }}" {% if version._id == entry.current_version_id %}selected{% endif %}>v{{ version.version_no }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="btn small primary">添加</button>
+      </form>
+    {% endif %}
+  </div>
+  {% if not entry.versions %}<p class="muted small">该题目暂无可用版本。</p>{% endif %}
+</article>
+{% endfor %}
+{% endblock %}

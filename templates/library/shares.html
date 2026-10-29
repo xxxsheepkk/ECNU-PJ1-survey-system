@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}共享给我的题目{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>共享给我的题目</h1>
+  <a class="btn" href="{{ url_for('library.index') }}">我的题目库</a>
+</div>
+
+{% if not shares %}
+  <section class="card empty"><p>还没有人共享题目给你。</p></section>
+{% endif %}
+
+{% for share in shares %}
+<article class="card">
+  <div class="page-head">
+    <h3>{{ share.question.title if share.question else "（题目已删除）" }}</h3>
+    {% if share.question %}
+      <a class="btn small" href="{{ url_for('surveys.dashboard') }}">在问卷中使用</a>
+    {% endif %}
+  </div>
+  <p class="muted small">
+    来自 {{ share.grantor.username }}
+    · {% if share.can_pull_latest %}跟随最新版本{% else %}固定版本{% endif %}
+    {% if share.resolved_version %} · 当前可用 v{{ share.resolved_version.version_no }}{% endif %}
+  </p>
+  <p class="muted small">共享题目可在「问卷 → 从题库选择」中添加到你的问卷。</p>
+</article>
+{% endfor %}
+{% endblock %}

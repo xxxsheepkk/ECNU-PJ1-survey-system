@@ -7,7 +7,9 @@ import secrets
 from flask import Flask, abort, g, render_template, request, session
 
 import auth
+import banks
 import fill
+import library
 import stats
 import surveys
 from config import Config
@@ -36,6 +38,8 @@ def create_app(test_config=None):
     app.register_blueprint(surveys.bp)
     app.register_blueprint(fill.bp)
     app.register_blueprint(stats.bp)
+    app.register_blueprint(library.bp)
+    app.register_blueprint(banks.bp)
 
     def csrf_token():
         token = session.get("_csrf")

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}跨问卷统计 · {{ question.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>跨问卷统计：{{ question.title }}</h1>
+    <p class="muted">{{ question.type|type_label }} · 共 {{ stats.total_answered }} 条回答（跨所有问卷）</p>
+  </div>
+  <a class="btn" href="{{ url_for('library.question_detail', question_id=question._id) }}">返回详情</a>
+</div>
+
+{% if stats.type in ("single", "multiple") %}
+  <section class="card">
+    <h2>合并统计（按选项汇总）</h2>
+    {% if not stats.merged %}
+      <p class="muted">暂无回答。</p>
+    {% else %}
+      <table>
+        <thead><tr><th>选项</th><th>次数</th><th>占比</th><th>出现在版本</th></tr></thead>
+        <tbody>
+          {% for entry in stats.merged %}
+          <tr>
+            <td>{{ entry.text }}{% if entry.label_differs %}<span class="muted small">（不同版本文案不同）</span>{% endif %}</td>
+            <td>{{ entry.count }}</td>
+            <td>{{ entry.percent }}%</td>
+            <td class="muted small">{% for vno in entry.appeared_in_versions %}v{{ vno }} {% endfor %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </section>
+
+  {% for block in stats.by_version %}
+  <section class="card">
+    <h2>版本 v{{ block.version_no }}（{{ block.answered }} 条回答）</h2>
+    <table>
+      <thead><tr><th>选项</th><th>次数</th><th>占比</th></tr></thead>
+      <tbody>
+        {% for opt in block.options %}
+        <tr><td>{{ opt.text }}</td><td>{{ opt.count }}</td><td>{{ opt.percent }}%</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endfor %}
+
+{% elif stats.type == "text" %}
+  <section class="card">
+    <h2>文本回答（{{ stats.text_rows|length }} 条）</h2>
+    {% if not stats.text_rows %}<p class="muted">暂无回答。</p>{% endif %}
+    {% for row in stats.text_rows %}
+      <p><span class="badge muted">v{{ row.version_no }}</span> {{ row.value }}</p>
+    {% endfor %}
+  </section>
+
+{% elif stats.type == "number" %}
+  {% if stats.number %}
+  <section class="card">
+    <h2>数值汇总</h2>
+    <p>样本 {{ stats.number.count }} 条 · 均值 {{ stats.number.avg }} · 最小 {{ stats.number.min }} · 最大 {{ stats.number.max }}</p>
+    <table>
+      <thead><tr><th>版本</th><th>样本</th><th>均值</th><th>最小</th><th>最大</th></tr></thead>
+      <tbody>
+        {% for block in stats.by_version %}
+        <tr><td>v{{ block.version_no }}</td><td>{{ block.count }}</td><td>{{ block.avg }}</td><td>{{ block.min }}</td><td>{{ block.max }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+{% endif %}
+
+{% if stats.equivalent_groups %}
+<section class="card">
+  <h2>等价版本组（内容相同）</h2>
+  {% for group in stats.equivalent_groups %}
+    <p>指纹 {{ group.content_hash }}：{% for vno in group.version_nos %}v{{ vno }} {% endfor %}</p>
+  {% endfor %}
+</section>
+{% endif %}
+{% endblock %}

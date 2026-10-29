@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ bank.name }} · 题库{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ bank.name }}</h1>
+  <a class="btn" href="{{ url_for('banks.index') }}">返回题库列表</a>
+</div>
+
+<section class="card narrow">
+  <h2>加入题目</h2>
+  {% if not candidates %}
+    <p class="muted">题目库还没有你的题目，先去「题目库」新建。</p>
+  {% else %}
+    <form method="post" action="{{ url_for('banks.item_add', bank_id=bank._id) }}">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <label>选择题目
+        <select name="question_id">
+          {% for q in candidates %}
+            <option value="{{ q._id }}">{{ q.title }}{% if q.current_version %}（v{{ q.current_version.version_no }}）{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="btn primary">加入题库</button>
+    </form>
+  {% endif %}
+</section>
+
+{% if not items %}
+  <section class="card empty"><p>该题库还没有题目。</p></section>
+{% endif %}
+
+{% for item in items %}
+<article class="card">
+  <div class="page-head">
+    <h3>{{ item.question.title if item.question else "（题目已删除）" }}</h3>
+    <form method="post" action="{{ url_for('banks.item_delete', bank_id=bank._id, item_id=item._id) }}" class="inline" onsubmit="return confirm('从题库移除该题？');">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <button type="submit" class="btn small danger">移除</button>
+    </form>
+  </div>
+  <p class="muted small">当前版本：{% if item.current_version %}v{{ item.current_version.version_no }}{% else %}—{% endif %}</p>
+  {% if item.version_options %}
+    <form method="post" action="{{ url_for('banks.item_version', bank_id=bank._id, item_id=item._id) }}" class="row">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <select name="version_id">
+        {% for v in item.version_options %}
+          <option value="{{ v._id }}" {% if v._id == item.current_version_id %}selected{% endif %}>v{{ v.version_no }} · {{ v.title }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn small">更新版本</button>
+    </form>
+  {% endif %}
+</article>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}题库{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>题库</h1>
+</div>
+
+<section class="card narrow">
+  <h2>新建题库</h2>
+  <form method="post" action="{{ url_for('banks.create') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <div class="row">
+      <input name="name" maxlength="80" required placeholder="题库名称">
+      <button type="submit" class="btn primary">创建</button>
+    </div>
+  </form>
+</section>
+
+{% if not banks %}
+  <section class="card empty"><p>还没有题库。创建一个题库后，可把题目加入其中集中管理。</p></section>
+{% endif %}
+
+{% for bank in banks %}
+<article class="card">
+  <div class="page-head">
+    <h3>{{ bank.name }}</h3>
+    <a class="btn small" href="{{ url_for('banks.detail', bank_id=bank._id) }}">管理</a>
+  </div>
+  <p class="muted small">含 {{ bank.item_count }} 道题</p>
+</article>
+{% endfor %}
+{% endblock %}

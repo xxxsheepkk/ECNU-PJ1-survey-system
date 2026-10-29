@@ -2,7 +2,9 @@
 
 import hashlib
 import hmac
+import json
 import math
+import uuid
 from datetime import datetime, timezone
 
 from bson import ObjectId
@@ -134,8 +136,66 @@ def option_map(question):
     return {opt["key"]: opt["text"] for opt in question.get("options", [])}
 
 
-def option_label(question, key):
-    return option_map(question).get(key, key)
+def option_map_by_opt_id(question):
+    return {
+        opt["opt_id"]: opt["text"]
+        for opt in question.get("options", [])
+        if "opt_id" in opt
+    }
+
+
+def option_label(question, key_or_opt_id):
+    """按 key 或 opt_id 查选项文案（兼容旧 key 与新 opt_id）。"""
+    for opt in question.get("options", []):
+        if opt.get("key") == key_or_opt_id or opt.get("opt_id") == key_or_opt_id:
+            return opt["text"]
+    return key_or_opt_id
+
+
+def new_opt_id():
+    """全局稳定、不可变的选项身份标识（跨版本统计合并的键）。"""
+    return uuid.uuid4().hex[:12]
+
+
+def content_hash(title, qtype, required, options, settings):
+    """版本内容哈希：标题 + 题型 + 必答 + 选项(key/text/opt_id) + 设置。"""
+    payload = {
+        "title": title,
+        "type": qtype,
+        "required": bool(required),
+        "options": [
+            {"key": o["key"], "text": o["text"], "opt_id": o.get("opt_id")}
+            for o in (options or [])
+        ],
+        "settings": settings or {},
+    }
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def assign_opt_ids(new_options, old_options=None):
+    """为选项分配 opt_id：未改动的选项沿用旧 opt_id，改动/新增的生成新 opt_id。"""
+    old_by_text = {o["text"]: o.get("opt_id") for o in (old_options or [])}
+    used = set()
+    result = []
+    for opt in new_options:
+        opt_id = old_by_text.get(opt["text"])
+        if opt_id is None or opt_id in used:
+            opt_id = new_opt_id()
+        used.add(opt_id)
+        result.append({"key": opt["key"], "text": opt["text"], "opt_id": opt_id})
+    return result
+
+
+def version_content(version):
+    """从版本/快照文档抽取内容四元组，供 hash 与渲染复用。"""
+    return {
+        "title": version["title"],
+        "type": version["type"],
+        "required": bool(version.get("required")),
+        "options": version.get("options", []),
+        "settings": version.get("settings") or {},
+    }
 
 
 def answer_to_text(question, value):

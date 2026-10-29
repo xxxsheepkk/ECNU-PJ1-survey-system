@@ -5,7 +5,7 @@ import math
 from flask import Blueprint, abort, current_app, g, render_template, request
 
 from auth import login_required
-from db import QUESTIONS, SURVEYS, get_db
+from db import SURVEY_QUESTIONS, SURVEYS, get_db
 from stats_service import count_submissions, question_stats
 from utils import QUESTION_TYPES, status_label, to_object_id
 
@@ -23,7 +23,9 @@ def _owned_survey_or_404(survey_id):
 
 
 def _questions(survey_id):
-    return list(get_db()[QUESTIONS].find({"survey_id": survey_id}).sort("order", 1))
+    return list(
+        get_db()[SURVEY_QUESTIONS].find({"survey_id": survey_id}).sort("order", 1)
+    )
 
 
 @bp.get("/surveys/<survey_id>/stats")
@@ -54,7 +56,9 @@ def question_detail(survey_id, question_id):
     qid = to_object_id(question_id)
     if qid is None:
         abort(404)
-    question = get_db()[QUESTIONS].find_one({"_id": qid, "survey_id": survey["_id"]})
+    question = get_db()[SURVEY_QUESTIONS].find_one(
+        {"_id": qid, "survey_id": survey["_id"]}
+    )
     if question is None:
         abort(404)
 

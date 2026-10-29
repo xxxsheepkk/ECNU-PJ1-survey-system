@@ -1,4 +1,8 @@
-"""问卷与题目管理（创建者侧）。"""
+"""问卷与题目引用管理（创建者侧）。
+
+第二阶段：题目统一存在于题目库（questions 族 + question_versions 版本），
+问卷通过 survey_questions 引用某个版本并冻结快照；发布后锁定引用。
+"""
 
 import secrets
 
@@ -15,18 +19,31 @@ from flask import (
 from pymongo.errors import DuplicateKeyError
 
 from auth import login_required
-from db import QUESTIONS, RESPONSES, SURVEYS, get_db
+from db import (
+    QUESTION_SHARES,
+    QUESTION_VERSIONS,
+    QUESTIONS,
+    RESPONSES,
+    SURVEY_QUESTIONS,
+    SURVEYS,
+    get_db,
+)
+from library import create_version, versions_of
 from logic import describe_rule, validate_all_rules, validate_jump_rule
+from question_forms import (
+    form_question_values,
+    parse_question_form,
+    question_values,
+)
 from stats_service import count_submissions
 from utils import (
     COUNT_VALUE_OPERATORS,
     JUMP_OPERATORS,
     OPTION_VALUE_OPERATORS,
     QUESTION_TYPES,
+    assign_opt_ids,
     is_survey_open,
     parse_local_datetime,
-    parse_optional_float,
-    parse_optional_int,
     question_settings_summary,
     status_label,
     to_object_id,
@@ -46,15 +63,19 @@ def _owned_survey_or_404(survey_id):
     return survey
 
 
-def _questions(survey_id):
-    return list(get_db()[QUESTIONS].find({"survey_id": survey_id}).sort("order", 1))
+def _survey_questions(survey_id):
+    return list(
+        get_db()[SURVEY_QUESTIONS].find({"survey_id": survey_id}).sort("order", 1)
+    )
 
 
-def _question_or_404(survey_id, question_id):
+def _survey_question_or_404(survey_id, question_id):
     qid = to_object_id(question_id)
     if qid is None:
         abort(404)
-    question = get_db()[QUESTIONS].find_one({"_id": qid, "survey_id": survey_id})
+    question = get_db()[SURVEY_QUESTIONS].find_one(
+        {"_id": qid, "survey_id": survey_id}
+    )
     if question is None:
         abort(404)
     return question
@@ -90,169 +111,41 @@ def _parse_survey_form():
     }, errors
 
 
-def _next_option_key(used):
-    for index in range(26):
-        key = chr(ord("a") + index)
-        if key not in used:
-            return key
-    return f"o{len(used) + 1}"
-
-
-def _parse_question_form(existing=None):
-    """解析题目表单；编辑时题型保持不变。"""
-    qtype = request.form.get("type") if existing is None else existing["type"]
-    if qtype not in QUESTION_TYPES:
-        return None, ["请选择合法的题型。"]
-
-    title = request.form.get("title", "").strip()
-    errors = []
-    if not title:
-        errors.append("请填写题目内容。")
-    elif len(title) > 500:
-        errors.append("题目内容最多 500 个字符。")
-    required = bool(request.form.get("required"))
-
-    options = []
-    settings = {}
-
-    if qtype in ("single", "multiple"):
-        lines = [
-            line.strip()
-            for line in request.form.get("options", "").splitlines()
-            if line.strip()
-        ]
-        if len(lines) < 2:
-            errors.append("选择题至少需要 2 个选项。")
-        elif len(lines) > 20:
-            errors.append("选择题最多支持 20 个选项。")
-        elif len(set(lines)) != len(lines):
-            errors.append("选项内容不能重复。")
-
-        old_key_by_text = {
-            opt["text"]: opt["key"] for opt in (existing or {}).get("options", [])
-        }
-        used = set()
-        for text in lines:
-            key = old_key_by_text.get(text)
-            if key is None or key in used:
-                key = _next_option_key(used)
-            used.add(key)
-            options.append({"key": key, "text": text})
-
-        if qtype == "multiple":
-            low, low_error = parse_optional_int(request.form.get("min_selections"))
-            high, high_error = parse_optional_int(request.form.get("max_selections"))
-            if low_error:
-                errors.append("最少选择数量" + low_error + "。")
-            if high_error:
-                errors.append("最多选择数量" + high_error + "。")
-            if low is not None and low < 1:
-                errors.append("最少选择数量必须大于等于 1。")
-            if high is not None and high < 1:
-                errors.append("最多选择数量必须大于等于 1。")
-            if low is not None and high is not None and low > high:
-                errors.append("最少选择数量不能大于最多选择数量。")
-            if high is not None and len(options) and high > len(options):
-                errors.append("最多选择数量不能超过选项总数。")
-            # 重做时补充的边界校验
-            if low is not None and len(options) and low > len(options):
-                errors.append("最少选择数量不能超过选项总数。")
-            settings = {"min_selections": low, "max_selections": high}
-
-    elif qtype == "text":
-        low, low_error = parse_optional_int(request.form.get("min_length"))
-        high, high_error = parse_optional_int(request.form.get("max_length"))
-        if low_error:
-            errors.append("最少字数" + low_error + "。")
-        if high_error:
-            errors.append("最多字数" + high_error + "。")
-        if low is not None and low < 0:
-            errors.append("最少字数不能为负数。")
-        if high is not None and high < 0:
-            errors.append("最多字数不能为负数。")
-        if low is not None and high is not None and low > high:
-            errors.append("最少字数不能大于最多字数。")
-        if high is not None and high > 5000:
-            errors.append("最多字数不能超过 5000。")
-        settings = {"min_length": low, "max_length": high}
-
-    elif qtype == "number":
-        low, low_error = parse_optional_float(request.form.get("min_value"))
-        high, high_error = parse_optional_float(request.form.get("max_value"))
-        if low_error:
-            errors.append("最小值" + low_error + "。")
-        if high_error:
-            errors.append("最大值" + high_error + "。")
-        if low is not None and high is not None and low > high:
-            errors.append("最小值不能大于最大值。")
-        settings = {
-            "min": low,
-            "max": high,
-            "integer_only": bool(request.form.get("integer_only")),
-        }
-
+def _make_survey_question(survey_id, question, version, order):
+    """由题目族 + 版本构造问卷引用（冻结快照平铺）。"""
     return {
-        "type": qtype,
-        "title": title,
-        "required": required,
-        "options": options,
-        "settings": settings,
-    }, errors
-
-
-def _question_values(question=None):
-    if question is None:
-        return {
-            "type": "single",
-            "title": "",
-            "required": False,
-            "options": "",
-            "min_selections": "",
-            "max_selections": "",
-            "min_length": "",
-            "max_length": "",
-            "min_value": "",
-            "max_value": "",
-            "integer_only": False,
-        }
-    settings = question.get("settings") or {}
-    return {
-        "type": question["type"],
-        "title": question["title"],
-        "required": question.get("required", False),
-        "options": "\n".join(opt["text"] for opt in question.get("options", [])),
-        "min_selections": _display_number(settings.get("min_selections")),
-        "max_selections": _display_number(settings.get("max_selections")),
-        "min_length": _display_number(settings.get("min_length")),
-        "max_length": _display_number(settings.get("max_length")),
-        "min_value": _display_number(settings.get("min")),
-        "max_value": _display_number(settings.get("max")),
-        "integer_only": bool(settings.get("integer_only")),
+        "survey_id": survey_id,
+        "question_id": question["_id"],
+        "version_id": version["_id"],
+        "order": order,
+        "title": version["title"],
+        "type": version["type"],
+        "required": version["required"],
+        "options": version["options"],
+        "settings": version["settings"],
+        "jump_rules": [],
+        "locked": False,
+        "created_at": utcnow(),
+        "updated_at": utcnow(),
     }
 
 
-def _form_question_values():
-    return {
-        "type": request.form.get("type", "single"),
-        "title": request.form.get("title", ""),
-        "required": bool(request.form.get("required")),
-        "options": request.form.get("options", ""),
-        "min_selections": request.form.get("min_selections", ""),
-        "max_selections": request.form.get("max_selections", ""),
-        "min_length": request.form.get("min_length", ""),
-        "max_length": request.form.get("max_length", ""),
-        "min_value": request.form.get("min_value", ""),
-        "max_value": request.form.get("max_value", ""),
-        "integer_only": bool(request.form.get("integer_only")),
-    }
-
-
-def _display_number(value):
-    if value is None:
-        return ""
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value)
+def _refresh_snapshot(db, survey_question, version):
+    db[SURVEY_QUESTIONS].update_one(
+        {"_id": survey_question["_id"]},
+        {
+            "$set": {
+                "version_id": version["_id"],
+                "title": version["title"],
+                "type": version["type"],
+                "required": version["required"],
+                "options": version["options"],
+                "settings": version["settings"],
+                "jump_rules": [],
+                "updated_at": utcnow(),
+            }
+        },
+    )
 
 
 def _prune_rules(question, options):
@@ -262,7 +155,9 @@ def _prune_rules(question, options):
         condition = rule.get("condition") or {}
         operator = condition.get("operator")
         value = condition.get("value")
-        if operator in OPTION_VALUE_OPERATORS and value not in keys:
+        if operator in OPTION_VALUE_OPERATORS and value not in keys and value not in [
+            opt["opt_id"] for opt in options
+        ]:
             continue
         if operator in COUNT_VALUE_OPERATORS:
             try:
@@ -276,16 +171,111 @@ def _prune_rules(question, options):
 
 def _renumber_questions(survey_id):
     db = get_db()
-    questions = _questions(survey_id)
+    questions = _survey_questions(survey_id)
     for question in questions:
-        db[QUESTIONS].update_one(
+        db[SURVEY_QUESTIONS].update_one(
             {"_id": question["_id"]},
             {"$set": {"order": question["order"] + 10000}},
         )
     for index, question in enumerate(questions, start=1):
-        db[QUESTIONS].update_one(
+        db[SURVEY_QUESTIONS].update_one(
             {"_id": question["_id"]}, {"$set": {"order": index}}
         )
+
+
+def _attach_meta(db, survey_question):
+    """附加题目族与版本号，供页面展示。"""
+    version = db[QUESTION_VERSIONS].find_one({"_id": survey_question["version_id"]})
+    survey_question["version_no"] = version["version_no"] if version else None
+    return survey_question
+
+
+def _question_access(db, question_id, user_id):
+    """返回 (question, share)；share 为 None 表示所有者；无权限返回 (None, None)。"""
+    question = db[QUESTIONS].find_one({"_id": question_id, "deleted_at": None})
+    if question is None:
+        return None, None
+    if question["owner_id"] == user_id:
+        return question, None
+    share = db[QUESTION_SHARES].find_one(
+        {
+            "question_id": question_id,
+            "grantee_user_id": user_id,
+            "status": "active",
+            "can_use": True,
+        }
+    )
+    if share is None:
+        return None, None
+    return question, share
+
+
+def _allowed_versions(db, family, question_id):
+    """可换版本范围：所有者看全部；共享题目按共享约定（跟随最新 / 固定版本）。
+
+    返回 (versions, error)。error 非空表示当前用户无权使用该题目。
+    """
+    if family is None:
+        return [], "题目不存在。"
+    if family["owner_id"] == g.user["_id"]:
+        return versions_of(db, question_id), None
+
+    share = db[QUESTION_SHARES].find_one(
+        {
+            "question_id": question_id,
+            "grantee_user_id": g.user["_id"],
+            "status": "active",
+            "can_use": True,
+        }
+    )
+    if share is None:
+        return [], "没有使用该题目的权限。"
+    if share.get("can_pull_latest"):
+        return versions_of(db, question_id), None
+    pinned = db[QUESTION_VERSIONS].find_one({"_id": share.get("pinned_version_id")})
+    if pinned is None:
+        return [], "共享题目已锁定版本，但该版本不可用。"
+    return [pinned], None
+
+
+def _pickable_questions(db, user_id):
+    """可选题列表：我的题目 + 共享给我的题目。返回 [{question, source, share, versions}]。"""
+    entries = []
+    owned = list(db[QUESTIONS].find({"owner_id": user_id, "deleted_at": None}))
+    for question in owned:
+        entries.append(
+            {
+                "question": question,
+                "source": "我的题目",
+                "share": None,
+                "versions": versions_of(db, question["_id"]),
+            }
+        )
+    shares = list(
+        db[QUESTION_SHARES].find(
+            {"grantee_user_id": user_id, "status": "active", "can_use": True}
+        )
+    )
+    question_ids = [s["question_id"] for s in shares]
+    questions = {
+        q["_id"]: q
+        for q in db[QUESTIONS].find({"_id": {"$in": question_ids}, "deleted_at": None})
+    }
+    for share in shares:
+        question = questions.get(share["question_id"])
+        if question is None:
+            continue
+        if share.get("can_pull_latest"):
+            versions = versions_of(db, question["_id"])
+        else:
+            pinned = db[QUESTION_VERSIONS].find_one(
+                {"_id": share.get("pinned_version_id")}
+            )
+            versions = [pinned] if pinned else []
+        entries.append(
+            {"question": question, "source": "共享给我", "share": share, "versions": versions}
+        )
+    return entries
 
 
 @bp.get("/")
@@ -395,7 +385,7 @@ def update_deadline(survey_id):
 def detail(survey_id):
     survey = _owned_survey_or_404(survey_id)
     db = get_db()
-    questions = _questions(survey["_id"])
+    questions = [_attach_meta(db, q) for q in _survey_questions(survey["_id"])]
     by_id = {question["_id"]: question for question in questions}
     for question in questions:
         question["settings_summary"] = question_settings_summary(question)
@@ -439,7 +429,7 @@ def publish(survey_id):
     if survey["status"] != "draft":
         flash("只有草稿可以发布。", "warning")
         return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
-    questions = _questions(survey["_id"])
+    questions = _survey_questions(survey["_id"])
     if not questions:
         flash("请至少添加一道题目后再发布。", "error")
         return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
@@ -449,11 +439,15 @@ def publish(survey_id):
             flash(error, "error")
         return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
     now = utcnow()
-    get_db()[SURVEYS].update_one(
+    db = get_db()
+    db[SURVEYS].update_one(
         {"_id": survey["_id"]},
         {"$set": {"status": "published", "published_at": now, "updated_at": now}},
     )
-    flash("问卷已发布，可以分享链接了。", "success")
+    db[SURVEY_QUESTIONS].update_many(
+        {"survey_id": survey["_id"], "locked": False}, {"$set": {"locked": True}}
+    )
+    flash("问卷已发布，题目已锁定，可以分享链接了。", "success")
     return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
 
 
@@ -473,6 +467,70 @@ def close(survey_id):
     return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
 
 
+# --------------------------------------------------------------------------
+# 添加题目：从题库/题目库选择
+# --------------------------------------------------------------------------
+
+@bp.get("/surveys/<survey_id>/questions/pick")
+@login_required
+def question_pick(survey_id):
+    survey = _owned_survey_or_404(survey_id)
+    if survey["status"] != "draft":
+        flash("问卷发布后不能增加题目。", "warning")
+        return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
+    db = get_db()
+    entries = _pickable_questions(db, g.user["_id"])
+    existing = {
+        q["question_id"] for q in db[SURVEY_QUESTIONS].find({"survey_id": survey["_id"]})
+    }
+    for entry in entries:
+        entry["already_added"] = entry["question"]["_id"] in existing
+        entry["current_version_id"] = entry["question"]["current_version_id"]
+    return render_template(
+        "surveys/question_pick.html", survey=survey, entries=entries
+    )
+
+
+@bp.post("/surveys/<survey_id>/questions")
+@login_required
+def question_add(survey_id):
+    survey = _owned_survey_or_404(survey_id)
+    if survey["status"] != "draft":
+        flash("问卷发布后不能增加题目。", "warning")
+        return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
+
+    db = get_db()
+    question_id = to_object_id(request.form.get("question_id"))
+    version_id = to_object_id(request.form.get("version_id"))
+    question, share = _question_access(db, question_id, g.user["_id"])
+    if question is None:
+        flash("题目不存在或没有使用权限。", "error")
+        return redirect(url_for("surveys.question_pick", survey_id=survey["_id"]))
+
+    version = db[QUESTION_VERSIONS].find_one(
+        {"_id": version_id, "question_id": question["_id"]}
+    )
+    if version is None:
+        flash("所选版本不属于该题目。", "error")
+        return redirect(url_for("surveys.question_pick", survey_id=survey["_id"]))
+
+    if share is not None and not share.get("can_pull_latest"):
+        if version_id != share.get("pinned_version_id"):
+            flash("该共享题目已锁定版本，不能选择其他版本。", "error")
+            return redirect(url_for("surveys.question_pick", survey_id=survey["_id"]))
+
+    questions = _survey_questions(survey["_id"])
+    order = questions[-1]["order"] + 1 if questions else 1
+    doc = _make_survey_question(survey["_id"], question, version, order)
+    try:
+        db[SURVEY_QUESTIONS].insert_one(doc)
+    except DuplicateKeyError:
+        flash("该题目已在本问卷中。", "warning")
+        return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
+    flash("题目已添加。", "success")
+    return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
+
+
 @bp.route("/surveys/<survey_id>/questions/new", methods=["GET", "POST"])
 @login_required
 def question_new(survey_id):
@@ -482,26 +540,33 @@ def question_new(survey_id):
         return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
 
     if request.method == "POST":
-        fields, errors = _parse_question_form()
+        fields, errors = parse_question_form()
         if not errors:
-            questions = _questions(survey["_id"])
-            order = questions[-1]["order"] + 1 if questions else 1
+            db = get_db()
             now = utcnow()
-            get_db()[QUESTIONS].insert_one(
+            result = db[QUESTIONS].insert_one(
                 {
-                    "survey_id": survey["_id"],
-                    "order": order,
-                    "type": fields["type"],
+                    "owner_id": g.user["_id"],
                     "title": fields["title"],
-                    "required": fields["required"],
-                    "options": fields["options"],
-                    "settings": fields["settings"],
-                    "jump_rules": [],
+                    "type": fields["type"],
+                    "current_version_id": None,
+                    "derived_from_question_id": None,
+                    "derived_from_version_id": None,
+                    "deleted_at": None,
                     "created_at": now,
                     "updated_at": now,
                 }
             )
-            flash("题目已添加。", "success")
+            question = db[QUESTIONS].find_one({"_id": result.inserted_id})
+            fields["options"] = assign_opt_ids(fields["options"])
+            version = create_version(db, question, fields)
+
+            questions = _survey_questions(survey["_id"])
+            order = questions[-1]["order"] + 1 if questions else 1
+            db[SURVEY_QUESTIONS].insert_one(
+                _make_survey_question(survey["_id"], question, version, order)
+            )
+            flash("题目已添加（并保存到题目库）。", "success")
             return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
         for error in errors:
             flash(error, "error")
@@ -509,7 +574,7 @@ def question_new(survey_id):
             "surveys/question_form.html",
             survey=survey,
             question=None,
-            values=_form_question_values(),
+            values=form_question_values(),
             question_types=QUESTION_TYPES,
         )
 
@@ -517,10 +582,14 @@ def question_new(survey_id):
         "surveys/question_form.html",
         survey=survey,
         question=None,
-        values=_question_values(),
+        values=question_values(),
         question_types=QUESTION_TYPES,
     )
 
+
+# --------------------------------------------------------------------------
+# 编辑 / 换版 / 删除（草稿态）
+# --------------------------------------------------------------------------
 
 @bp.route(
     "/surveys/<survey_id>/questions/<question_id>/edit", methods=["GET", "POST"]
@@ -528,32 +597,42 @@ def question_new(survey_id):
 @login_required
 def question_edit(survey_id, question_id):
     survey = _owned_survey_or_404(survey_id)
-    question = _question_or_404(survey["_id"], question_id)
+    question = _survey_question_or_404(survey["_id"], question_id)
     if survey["status"] != "draft":
         flash("问卷发布后不能修改题目。", "warning")
         return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
 
+    db = get_db()
+    family = db[QUESTIONS].find_one({"_id": question["question_id"]})
+    if family is None or family["owner_id"] != g.user["_id"]:
+        flash("共享题目不可直接编辑，请在题目库中由所有者更新后换版。", "warning")
+        return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
+
     if request.method == "POST":
-        fields, errors = _parse_question_form(existing=question)
+        fields, errors = parse_question_form(existing=question)
         if not errors:
-            get_db()[QUESTIONS].update_one(
+            fields["options"] = assign_opt_ids(fields["options"], question["options"])
+            version = create_version(db, family, fields, base_version_id=question["version_id"])
+            db[SURVEY_QUESTIONS].update_one(
                 {"_id": question["_id"]},
                 {
                     "$set": {
-                        "title": fields["title"],
-                        "required": fields["required"],
-                        "options": fields["options"],
-                        "settings": fields["settings"],
-                        "jump_rules": _prune_rules(question, fields["options"]),
+                        "version_id": version["_id"],
+                        "title": version["title"],
+                        "type": version["type"],
+                        "required": version["required"],
+                        "options": version["options"],
+                        "settings": version["settings"],
+                        "jump_rules": _prune_rules(question, version["options"]),
                         "updated_at": utcnow(),
                     }
                 },
             )
-            flash("题目已更新。", "success")
+            flash("已生成新版本并更新本题。", "success")
             return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
         for error in errors:
             flash(error, "error")
-        values = _form_question_values()
+        values = form_question_values()
         values["type"] = question["type"]
         return render_template(
             "surveys/question_form.html",
@@ -567,23 +646,78 @@ def question_edit(survey_id, question_id):
         "surveys/question_form.html",
         survey=survey,
         question=question,
-        values=_question_values(question),
+        values=question_values(question),
         question_types=QUESTION_TYPES,
     )
+
+
+@bp.get("/surveys/<survey_id>/questions/<question_id>/version")
+@login_required
+def question_version_form(survey_id, question_id):
+    survey = _owned_survey_or_404(survey_id)
+    question = _survey_question_or_404(survey["_id"], question_id)
+    if survey["status"] != "draft" or question.get("locked"):
+        flash("题目已锁定，不能换版。", "warning")
+        return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
+    db = get_db()
+    family = db[QUESTIONS].find_one({"_id": question["question_id"]})
+    versions, error = _allowed_versions(db, family, question["question_id"])
+    if error:
+        flash(error, "error")
+        return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
+    return render_template(
+        "surveys/question_version.html",
+        survey=survey,
+        question=question,
+        family=family,
+        versions=versions,
+    )
+
+
+@bp.post("/surveys/<survey_id>/questions/<question_id>/version")
+@login_required
+def question_version(survey_id, question_id):
+    survey = _owned_survey_or_404(survey_id)
+    question = _survey_question_or_404(survey["_id"], question_id)
+    if survey["status"] != "draft" or question.get("locked"):
+        flash("题目已锁定，不能换版。", "warning")
+        return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
+
+    db = get_db()
+    family = db[QUESTIONS].find_one({"_id": question["question_id"]})
+    allowed, error = _allowed_versions(db, family, question["question_id"])
+    if error:
+        flash(error, "error")
+        return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
+
+    version_id = to_object_id(request.form.get("version_id"))
+    version = next((v for v in allowed if v["_id"] == version_id), None)
+    if version is None:
+        flash("所选版本不可用（共享题目可能已锁定版本）。", "error")
+        return redirect(
+            url_for(
+                "surveys.question_version_form",
+                survey_id=survey["_id"],
+                question_id=question["_id"],
+            )
+        )
+    _refresh_snapshot(db, question, version)
+    flash(f"已换到版本 v{version['version_no']}。", "success")
+    return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
 
 
 @bp.post("/surveys/<survey_id>/questions/<question_id>/delete")
 @login_required
 def question_delete(survey_id, question_id):
     survey = _owned_survey_or_404(survey_id)
-    question = _question_or_404(survey["_id"], question_id)
+    question = _survey_question_or_404(survey["_id"], question_id)
     if survey["status"] != "draft":
         flash("问卷发布后不能删除题目。", "warning")
         return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
 
     db = get_db()
-    db[QUESTIONS].delete_one({"_id": question["_id"]})
-    db[QUESTIONS].update_many(
+    db[SURVEY_QUESTIONS].delete_one({"_id": question["_id"]})
+    db[SURVEY_QUESTIONS].update_many(
         {"survey_id": survey["_id"]},
         {"$pull": {"jump_rules": {"target": question["_id"]}}},
     )
@@ -596,7 +730,7 @@ def question_delete(survey_id, question_id):
 @login_required
 def rule_add(survey_id, question_id):
     survey = _owned_survey_or_404(survey_id)
-    question = _question_or_404(survey["_id"], question_id)
+    question = _survey_question_or_404(survey["_id"], question_id)
     if survey["status"] != "draft":
         flash("问卷发布后不能修改跳转规则。", "warning")
         return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
@@ -611,7 +745,7 @@ def rule_add(survey_id, question_id):
             )
         )
 
-    questions = _questions(survey["_id"])
+    questions = _survey_questions(survey["_id"])
     rule, error = validate_jump_rule(
         question,
         request.form.get("operator"),
@@ -622,7 +756,7 @@ def rule_add(survey_id, question_id):
     if error:
         flash(error, "error")
     else:
-        get_db()[QUESTIONS].update_one(
+        get_db()[SURVEY_QUESTIONS].update_one(
             {"_id": question["_id"]}, {"$push": {"jump_rules": rule}}
         )
         flash("跳转规则已添加。", "success")
@@ -641,7 +775,7 @@ def rule_add(survey_id, question_id):
 @login_required
 def rule_delete(survey_id, question_id, rule_index):
     survey = _owned_survey_or_404(survey_id)
-    question = _question_or_404(survey["_id"], question_id)
+    question = _survey_question_or_404(survey["_id"], question_id)
     if survey["status"] != "draft":
         flash("问卷发布后不能修改跳转规则。", "warning")
         return redirect(url_for("surveys.detail", survey_id=survey["_id"]))
@@ -649,7 +783,7 @@ def rule_delete(survey_id, question_id, rule_index):
     rules = question.get("jump_rules", [])
     if 0 <= rule_index < len(rules):
         rules.pop(rule_index)
-        get_db()[QUESTIONS].update_one(
+        get_db()[SURVEY_QUESTIONS].update_one(
             {"_id": question["_id"]}, {"$set": {"jump_rules": rules}}
         )
         flash("跳转规则已删除。", "success")

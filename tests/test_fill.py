@@ -38,7 +38,9 @@ def test_single_choice_jump_skips_middle_questions(client, db):
     submitted = latest_submitted(db, survey)
     assert submitted["status"] == "submitted"
     assert submitted["path"] == [q1["_id"], q4["_id"]]
-    assert [item["value"] for item in submitted["answers"]] == ["a", "完成"]
+    # 单选答案以 opt_id 存储（跨版本统计按 opt_id 合并），"a" 对应第一个选项
+    opt_a = q1["options"][0]["opt_id"]
+    assert [item["value"] for item in submitted["answers"]] == [opt_a, "完成"]
 
 
 def test_multiple_choice_jump_by_contains(client, db):

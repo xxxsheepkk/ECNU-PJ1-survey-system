@@ -48,7 +48,10 @@
 <div class="page-head">
   <h2>题目（{{ questions|length }}）</h2>
   {% if can_edit %}
-    <a class="btn primary" href="{{ url_for('surveys.question_new', survey_id=survey._id) }}">添加题目</a>
+    <div class="row">
+      <a class="btn" href="{{ url_for('surveys.question_new', survey_id=survey._id) }}">新建题目</a>
+      <a class="btn primary" href="{{ url_for('surveys.question_pick', survey_id=survey._id) }}">从题库选择</a>
+    </div>
   {% endif %}
 </div>
 
@@ -59,10 +62,11 @@
 {% for question in questions %}
 <article class="card question-card" id="q-{{ question._id }}">
   <div class="page-head">
-    <h3>第 {{ question.order }} 题 · {{ question.type|type_label }} {% if question.required %}<span class="badge required">必答</span>{% endif %}</h3>
+    <h3>第 {{ question.order }} 题 · {{ question.type|type_label }} {% if question.required %}<span class="badge required">必答</span>{% endif %} <span class="muted small">题目库 v{{ question.version_no }}</span></h3>
     {% if can_edit %}
       <div class="row">
         <a class="btn small" href="{{ url_for('surveys.question_edit', survey_id=survey._id, question_id=question._id) }}">编辑</a>
+        <a class="btn small" href="{{ url_for('surveys.question_version_form', survey_id=survey._id, question_id=question._id) }}">换版</a>
         <form method="post" action="{{ url_for('surveys.question_delete', survey_id=survey._id, question_id=question._id) }}" class="inline" onsubmit="return confirm('删除这道题？相关跳转规则会一并清理。');">
           <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
           <button type="submit" class="btn small danger">删除</button>

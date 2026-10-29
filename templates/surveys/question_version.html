@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}换版 · {{ survey.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>更换题目版本</h1>
+  <a class="btn" href="{{ url_for('surveys.detail', survey_id=survey._id) }}">返回问卷</a>
+</div>
+
+<section class="card narrow">
+  <p class="muted">当前使用：v{{ question.version_no }} · {{ question.title }}</p>
+  <form method="post" action="{{ url_for('surveys.question_version', survey_id=survey._id, question_id=question._id) }}">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <label>选择版本
+      <select name="version_id">
+        {% for version in versions %}
+          <option value="{{ version._id }}" {% if version._id == question.version_id %}selected{% endif %}>
+            v{{ version.version_no }} · {{ version.title }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="btn primary">换到该版本</button>
+  </form>
+  <p class="muted small">换版会刷新本问卷中该题的快照，并清空其跳转规则。问卷发布后不可换版。</p>
+</section>
+{% endblock %}

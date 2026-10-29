@@ -2,7 +2,7 @@
 
 from bson import ObjectId
 
-from db import QUESTIONS, RESPONSES, SURVEYS
+from db import RESPONSES, SURVEY_QUESTIONS, SURVEYS
 
 
 def register(client, username="alice", password="secret123"):
@@ -76,7 +76,7 @@ def add_question(client, db, survey, qtype, title, **fields):
         follow_redirects=True,
     )
     assert response.status_code == 200
-    question = db[QUESTIONS].find_one(
+    question = db[SURVEY_QUESTIONS].find_one(
         {"survey_id": survey["_id"], "title": title}
     )
     assert question is not None, response.get_data(as_text=True)

@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}{{ question.title }} · 题目库{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ question.title }} <span class="muted small">{{ question.type|type_label }}</span></h1>
+    <p class="muted small">
+      {% if current %}当前 v{{ current.version_no }}{% endif %}
+      {% if question.derived_from_question_id %} · 派生自另一题目{% endif %}
+    </p>
+  </div>
+  <div class="row">
+    <a class="btn primary" href="{{ url_for('library.version_new', question_id=question._id) }}">编辑（生成新版本）</a>
+    <form method="post" action="{{ url_for('library.fork', question_id=question._id) }}" class="inline" onsubmit="return confirm('派生出新的独立题目？原题目保持不变。');">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <button type="submit" class="btn">派生新题目</button>
+    </form>
+    <a class="btn" href="{{ url_for('library.share', question_id=question._id) }}">共享</a>
+    <form method="post" action="{{ url_for('library.delete', question_id=question._id) }}" class="inline" onsubmit="return confirm('删除该题目？已引用它的问卷不受影响。');">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <button type="submit" class="btn danger">删除</button>
+    </form>
+  </div>
+</div>
+
+{% if current %}
+<section class="card">
+  <h2>当前版本 v{{ current.version_no }}</h2>
+  <p class="question-title">{{ current.title }} {% if current.required %}<span class="badge required">必答</span>{% endif %}</p>
+  {% if current.options %}
+    <ul class="options">
+      {% for opt in current.options %}
+        <li><span class="key">{{ opt.key }}</span> {{ opt.text }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  {% if current.settings_summary %}<p class="muted small">限制：{{ current.settings_summary }}</p>{% endif %}
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>版本历史</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>版本</th>
+        <th>标题</th>
+        <th>关系</th>
+        <th>来源</th>
+        <th>内容指纹</th>
+        <th>创建时间</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set edge_labels = {"root": "根版本", "derived": "升级", "restored": "恢复"} %}
+      {% for version in versions %}
+      <tr>
+        <td>v{{ version.version_no }}</td>
+        <td>{{ version.title }}</td>
+        <td>{{ edge_labels.get(version.edge_type, version.edge_type) }}</td>
+        <td>{% if version.derived_from_no is not none %}v{{ version.derived_from_no }}{% else %}—{% endif %}</td>
+        <td class="muted small">{{ version.hash_short }}</td>
+        <td class="muted small">{{ version.created_at|dt }}</td>
+        <td>
+          {% if version._id != question.current_version_id %}
+            <form method="post" action="{{ url_for('library.restore', question_id=question._id, version_id=version._id) }}" class="inline">
+              <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+              <button type="submit" class="btn small" onclick="return confirm('恢复 v{{ version.version_no }} 的内容并生成新版本？');">恢复此版</button>
+            </form>
+          {% else %}
+            <span class="badge published">当前</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>被问卷使用（{{ usage|length }}）</h2>
+  {% if not usage %}
+    <p class="muted">暂无问卷使用该题目。</p>
+  {% else %}
+    <table>
+      <thead><tr><th>问卷</th><th>状态</th><th>使用版本</th></tr></thead>
+      <tbody>
+        {% for row in usage %}
+        <tr>
+          <td>{{ row.survey.title }}</td>
+          <td><span class="badge {{ row.survey.status }}">{{ row.survey|status_label }}</span></td>
+          <td>{% if row.version %}v{{ row.version.version_no }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>共享给（{{ shares|length }}）</h2>
+  {% if not shares %}
+    <p class="muted">尚未共享给其他用户。</p>
+  {% else %}
+    <table>
+      <thead><tr><th>用户</th><th>方式</th><th>状态</th></tr></thead>
+      <tbody>
+        {% for share in shares %}
+        <tr>
+          <td>{{ share.grantee.username }}</td>
+          <td>{% if share.can_pull_latest %}跟随最新版本{% else %}固定 v{{ share.pinned_no }}{% endif %}</td>
+          <td>{% if share.status == "active" %}有效{% else %}已撤销{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>
+{% endblock %}

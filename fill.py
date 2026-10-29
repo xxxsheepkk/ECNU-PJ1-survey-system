@@ -15,7 +15,7 @@ from flask import (
 from pymongo.errors import DuplicateKeyError
 
 from auth import login_required
-from db import QUESTIONS, RESPONSES, SURVEYS, get_db
+from db import RESPONSES, SURVEY_QUESTIONS, SURVEYS, get_db
 from logic import evaluate_next_question, normalize_answer
 from utils import (
     answer_to_text,
@@ -36,7 +36,9 @@ def _survey_or_404(public_id):
 
 
 def _questions(survey_id):
-    return list(get_db()[QUESTIONS].find({"survey_id": survey_id}).sort("order", 1))
+    return list(
+        get_db()[SURVEY_QUESTIONS].find({"survey_id": survey_id}).sort("order", 1)
+    )
 
 
 def _draft_session_key(public_id):
@@ -88,9 +90,16 @@ def _completed_count(survey):
 
 def _find_answer(draft, question_id):
     for answer in draft.get("answers", []):
-        if answer["question_id"] == question_id:
+        if answer["survey_question_id"] == question_id:
             return answer
     return None
+
+
+def _opt_id_to_key(question, opt_id):
+    for opt in question.get("options", []):
+        if opt.get("opt_id") == opt_id:
+            return opt["key"]
+    return opt_id
 
 
 def _current_question(draft, questions):
@@ -214,15 +223,22 @@ def _render_question(
     survey, draft, question, questions, saved=None, form_values=None, error=None, status=200
 ):
     if question["type"] == "multiple":
-        selected = list(form_values) if form_values is not None else list(
-            (saved or {}).get("value") or []
-        )
+        if form_values is not None:
+            selected = list(form_values)
+        else:
+            selected = [
+                _opt_id_to_key(question, opt_id)
+                for opt_id in ((saved or {}).get("value") or [])
+            ]
     else:
         if form_values is not None:
             selected = form_values
         else:
             value = (saved or {}).get("value")
-            selected = "" if value is None else str(value)
+            if question["type"] == "single":
+                selected = _opt_id_to_key(question, value) if value else ""
+            else:
+                selected = "" if value is None else str(value)
 
     return (
         render_template(
@@ -279,11 +295,15 @@ def answer(public_id):
 
     now = utcnow()
     answers = [
-        item for item in draft.get("answers", []) if item["question_id"] != question["_id"]
+        item
+        for item in draft.get("answers", [])
+        if item["survey_question_id"] != question["_id"]
     ]
     answers.append(
         {
-            "question_id": question["_id"],
+            "survey_question_id": question["_id"],
+            "question_id": question["question_id"],
+            "version_id": question["version_id"],
             "type": question["type"],
             "value": value,
             "answered_at": now,
@@ -369,13 +389,10 @@ def submit(public_id):
             errors.append("答卷中包含已不存在的题目，无法提交。")
             continue
         answer = _find_answer(draft, question_id)
+        # 答案在作答时已按冻结快照校验并规范化；发布后快照不可变，这里只检查必答是否漏答
         if answer is None:
             if question.get("required"):
                 errors.append(f"第 {question['order']} 题为必答题，尚未作答。")
-            continue
-        _, error = normalize_answer(question, answer["value"])
-        if error:
-            errors.append(f"第 {question['order']} 题：{error}")
     if errors:
         for error in errors:
             flash(error, "error")

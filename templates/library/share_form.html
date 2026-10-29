@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}共享题目 · {{ question.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>共享题目：{{ question.title }}</h1>
+  <a class="btn" href="{{ url_for('library.question_detail', question_id=question._id) }}">返回详情</a>
+</div>
+
+<section class="card narrow">
+  <h2>共享给其他用户</h2>
+  <form method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <label>对方用户名
+      <input name="username" required maxlength="40">
+    </label>
+    <label class="check">
+      <input type="checkbox" name="can_pull_latest" checked>
+      允许对方跟随最新版本（否则固定当前版本）
+    </label>
+    <button type="submit" class="btn primary">共享</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>已有共享（{{ shares|length }}）</h2>
+  {% if not shares %}
+    <p class="muted">尚未共享给其他用户。</p>
+  {% else %}
+    <table>
+      <thead><tr><th>用户</th><th>方式</th><th>状态</th><th></th></tr></thead>
+      <tbody>
+        {% for share in shares %}
+        <tr>
+          <td>{{ share.grantee.username }}</td>
+          <td>{% if share.can_pull_latest %}跟随最新版本{% else %}固定当前版本{% endif %}</td>
+          <td>{% if share.status == "active" %}有效{% else %}已撤销{% endif %}</td>
+          <td>
+            {% if share.status == "active" %}
+              <form method="post" action="{{ url_for('library.share_revoke', question_id=question._id) }}" class="inline" onsubmit="return confirm('撤销对该用户的共享？已引用该题的问卷不受影响。');">
+                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                <input type="hidden" name="grantee_user_id" value="{{ share.grantee_user_id }}">
+                <button type="submit" class="btn small danger">撤销</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>
+{% endblock %}

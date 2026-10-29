@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}{{ "生成新版本" if mode == "version" else "新建题目" }} · 题目库{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ "生成新版本" if mode == "version" else "新建题目" }}</h1>
+  {% if mode == "version" %}<p class="muted">基于「{{ question.title }}」生成新版本，原版本保持不变。</p>{% endif %}
+  <form method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    {% if mode == "version" %}
+      <p>题型：<strong>{{ question.type|type_label }}</strong></p>
+      <input type="hidden" name="type" value="{{ question.type }}">
+    {% else %}
+      <label>题型
+        <select name="type" id="question-type">
+          {% for key, label in QUESTION_TYPES.items() %}
+            <option value="{{ key }}" {% if values.get('type') == key %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    {% endif %}
+
+    <label>题目内容
+      <input name="title" value="{{ values.get('title', '') }}" maxlength="500" required>
+    </label>
+    <label class="check">
+      <input type="checkbox" name="required" {% if values.get('required') %}checked{% endif %}>
+      必答
+    </label>
+
+    <div class="type-fields" data-type="single multiple">
+      <label>选项（每行一个）
+        <textarea name="options" rows="5">{{ values.get('options', '') }}</textarea>
+      </label>
+    </div>
+
+    <div class="type-fields" data-type="multiple">
+      <div class="row">
+        <label>最少选择数量
+          <input type="number" name="min_selections" min="1" value="{{ values.get('min_selections', '') }}">
+        </label>
+        <label>最多选择数量
+          <input type="number" name="max_selections" min="1" value="{{ values.get('max_selections', '') }}">
+        </label>
+      </div>
+    </div>
+
+    <div class="type-fields" data-type="text">
+      <div class="row">
+        <label>最少字数
+          <input type="number" name="min_length" min="0" value="{{ values.get('min_length', '') }}">
+        </label>
+        <label>最多字数
+          <input type="number" name="max_length" min="0" value="{{ values.get('max_length', '') }}">
+        </label>
+      </div>
+    </div>
+
+    <div class="type-fields" data-type="number">
+      <div class="row">
+        <label>最小值
+          <input type="number" step="any" name="min_value" value="{{ values.get('min_value', '') }}">
+        </label>
+        <label>最大值
+          <input type="number" step="any" name="max_value" value="{{ values.get('max_value', '') }}">
+        </label>
+      </div>
+      <label class="check">
+        <input type="checkbox" name="integer_only" {% if values.get('integer_only') %}checked{% endif %}>
+        只允许整数
+      </label>
+    </div>
+
+    <div class="row">
+      <button type="submit" class="btn primary">保存</button>
+      {% if mode == "version" %}
+        <a class="btn" href="{{ url_for('library.question_detail', question_id=question._id) }}">取消</a>
+      {% else %}
+        <a class="btn" href="{{ url_for('library.index') }}">取消</a>
+      {% endif %}
+    </div>
+  </form>
+</section>
+
+<script>
+  (function () {
+    var typeSelect = document.getElementById('question-type');
+    function refresh() {
+      var current = typeSelect ? typeSelect.value : "{{ question.type if mode == 'version' else values.get('type', 'single') }}";
+      document.querySelectorAll('.type-fields').forEach(function (el) {
+        var types = el.getAttribute('data-type').split(' ');
+        el.style.display = types.indexOf(current) >= 0 ? '' : 'none';
+      });
+    }
+    if (typeSelect) { typeSelect.addEventListener('change', refresh); }
+    refresh();
+  })();
+</script>
+{% endblock %}

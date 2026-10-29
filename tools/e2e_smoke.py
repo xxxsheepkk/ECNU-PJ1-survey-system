@@ -21,7 +21,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from config import Config  # noqa: E402
-from db import QUESTIONS, RESPONSES, SURVEYS, USERS  # noqa: E402
+from db import (  # noqa: E402
+    QUESTION_SHARES,
+    QUESTION_VERSIONS,
+    QUESTIONS,
+    RESPONSES,
+    SURVEY_QUESTIONS,
+    SURVEYS,
+    USERS,
+)
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:5001").rstrip("/")
 CSRF_RE = re.compile(r'name="_csrf" value="([^"]+)"')
@@ -233,8 +241,16 @@ def cleanup(survey_id, usernames):
     if survey_id:
         oid = ObjectId(survey_id)
         db[RESPONSES].delete_many({"survey_id": oid})
-        db[QUESTIONS].delete_many({"survey_id": oid})
+        db[SURVEY_QUESTIONS].delete_many({"survey_id": oid})
         db[SURVEYS].delete_one({"_id": oid})
+    # 清理本次测试用户创建的题目族及其版本/共享
+    user_ids = [u["_id"] for u in db[USERS].find({"username": {"$in": usernames}})]
+    if user_ids:
+        qids = [q["_id"] for q in db[QUESTIONS].find({"owner_id": {"$in": user_ids}})]
+        if qids:
+            db[QUESTION_VERSIONS].delete_many({"question_id": {"$in": qids}})
+            db[QUESTION_SHARES].delete_many({"question_id": {"$in": qids}})
+            db[QUESTIONS].delete_many({"_id": {"$in": qids}})
     db[USERS].delete_many({"username": {"$in": usernames}})
     client.close()
 

@@ -13,6 +13,8 @@
       {% if current_user %}
         <span class="who">你好，{{ current_user.username }}</span>
         <a href="{{ url_for('surveys.dashboard') }}">我的问卷</a>
+        <a href="{{ url_for('library.index') }}">题目库</a>
+        <a href="{{ url_for('banks.index') }}">题库</a>
         <form method="post" action="{{ url_for('auth.logout') }}" class="inline">
           <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
           <button type="submit" class="link-button">退出</button>
@@ -37,6 +39,6 @@
     {% block content %}{% endblock %}
   </main>
 
-  <footer class="footer">MongoDB 在线问卷系统 · 第一阶段</footer>
+  <footer class="footer">MongoDB 在线问卷系统 · 第二阶段</footer>
 </body>
 </html>

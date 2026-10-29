@@ -15,20 +15,27 @@ from utils import (
 )
 
 
+def _key_to_opt_id(question, key):
+    for opt in question.get("options", []):
+        if opt.get("key") == key:
+            return opt.get("opt_id")
+    return None
+
+
 def normalize_answer(question, raw):
-    """校验并规范化答案，返回 (value, error)。"""
+    """校验并规范化答案，返回 (value, error)。单选/多选返回 opt_id，保证跨版本合并稳定。"""
     qtype = question["type"]
     required = bool(question.get("required"))
     settings = question.get("settings") or {}
-    keys = [opt["key"] for opt in question.get("options", [])]
 
     if qtype == "single":
         value = "" if raw is None else str(raw).strip()
         if not value:
             return (None, "该题为必答题，请选择一个选项。") if required else (None, None)
-        if value not in keys:
+        opt_id = _key_to_opt_id(question, value)
+        if opt_id is None:
             return None, "选择的选项不存在，请重新选择。"
-        return value, None
+        return opt_id, None
 
     if qtype == "multiple":
         selected = []
@@ -36,25 +43,29 @@ def normalize_answer(question, raw):
             item = str(item).strip()
             if item and item not in selected:
                 selected.append(item)
-        selected = [key for key in keys if key in selected]
 
-        if not selected:
+        opt_ids = []
+        for key in selected:
+            opt_id = _key_to_opt_id(question, key)
+            if opt_id is None:
+                return None, "包含不存在的选项，请重新选择。"
+            if opt_id not in opt_ids:
+                opt_ids.append(opt_id)
+
+        if not opt_ids:
             return (
                 (None, "该题为必答题，请至少选择一个选项。")
                 if required
                 else ([], None)
             )
-        for key in selected:
-            if key not in keys:
-                return None, "包含不存在的选项，请重新选择。"
 
         low = settings.get("min_selections")
         high = settings.get("max_selections")
-        if low is not None and len(selected) < low:
+        if low is not None and len(opt_ids) < low:
             return None, f"该题至少需要选择 {low} 项。"
-        if high is not None and len(selected) > high:
+        if high is not None and len(opt_ids) > high:
             return None, f"该题最多只能选择 {high} 项。"
-        return selected, None
+        return opt_ids, None
 
     if qtype == "text":
         value = "" if raw is None else str(raw)
@@ -184,6 +195,8 @@ def validate_jump_rule(source, operator, raw_value, raw_target, questions):
         value = str(raw_value or "").strip()
         if value not in keys:
             return None, "请选择一个有效的选项作为条件。"
+        # 规则条件也存 opt_id，与答案值（opt_id）保持一致
+        value = _key_to_opt_id(source, value)
     elif operator in COUNT_VALUE_OPERATORS:
         try:
             value = int(str(raw_value).strip())
